@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 
-const CATEGORIES = ['electronics', 'clothing', 'food', 'books', 'other'];
-const STATUSES = ['active', 'inactive', 'discontinued'];
+export const CATEGORIES = ['electronics', 'clothing', 'food', 'books', 'other'];
+export const STATUSES = ['active', 'inactive', 'discontinued'];
 
 const products = [];
 
@@ -42,9 +42,16 @@ const validate = (data, isCreate) => {
 };
 
 export const findAll = (filters = {}) => {
-  let result = [...products];
+  let result = [...products].filter(p => !p.archivedAt);
   if (filters.category) result = result.filter(p => p.category === filters.category);
   if (filters.status) result = result.filter(p => p.status === filters.status);
+  if (filters.minPrice !== undefined) result = result.filter(p => p.price !== null && p.price >= filters.minPrice);
+  if (filters.maxPrice !== undefined) result = result.filter(p => p.price !== null && p.price <= filters.maxPrice);
+  if (filters.inStock !== undefined) result = result.filter(p => filters.inStock ? p.stock > 0 : p.stock === 0);
+  if (filters.search) {
+    const q = filters.search.toLowerCase();
+    result = result.filter(p => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q));
+  }
   if (filters.name) {
     const query = filters.name.toLowerCase();
     result = result.filter(p => p.name.toLowerCase().includes(query));
@@ -52,7 +59,7 @@ export const findAll = (filters = {}) => {
   return result;
 };
 
-export const findById = (id) => products.find(p => p.id === id) ?? null;
+export const findById = (id) => products.find(p => p.id === id && !p.archivedAt) ?? null;
 
 export const findBySku = (sku) => products.find(p => p.sku === sku) ?? null;
 
@@ -76,6 +83,7 @@ export const create = (data) => {
     stock: data.stock !== undefined ? Number(data.stock) : 0,
     status: data.status ?? 'active',
     createdAt: new Date(),
+    archivedAt: null,
   };
 
   products.push(product);
@@ -83,7 +91,7 @@ export const create = (data) => {
 };
 
 export const update = (id, patch) => {
-  const index = products.findIndex(p => p.id === id);
+  const index = products.findIndex(p => p.id === id && !p.archivedAt);
   if (index === -1) return null;
 
   validate(patch, false);
@@ -105,9 +113,16 @@ export const update = (id, patch) => {
   return updated;
 };
 
-export const deleteById = (id) => {
+export const archiveById = (id) => {
+  const index = products.findIndex(p => p.id === id && !p.archivedAt);
+  if (index === -1) return null;
+  products[index] = { ...products[index], archivedAt: new Date() };
+  return products[index];
+};
+
+export const restore = (id) => {
   const index = products.findIndex(p => p.id === id);
   if (index === -1) return null;
-  const [deleted] = products.splice(index, 1);
-  return deleted;
+  products[index] = { ...products[index], archivedAt: null };
+  return products[index];
 };
