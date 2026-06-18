@@ -111,33 +111,19 @@ export const update = (id, patch) => {
   const existing = byId.get(id);
   if (!existing || existing.archivedAt) return null;
 
-  // Whitelist mutable fields — prevents mass assignment of id/createdAt/archivedAt
-  const { name, sku, description, category, price, stock, status } = patch;
+  // Whitelist mutable fields — id, sku, and createdAt are immutable after creation
+  const { name, description, category, price, stock, status } = patch;
   const allowed = Object.fromEntries(
-    Object.entries({ name, sku, description, category, price, stock, status })
+    Object.entries({ name, description, category, price, stock, status })
       .filter(([, v]) => v !== undefined)
   );
 
   validate(allowed, false);
 
-  if (allowed.sku !== undefined) {
-    const dup = bySku.get(allowed.sku);
-    if (dup && dup.id !== id) {
-      const err = new Error('A product with this SKU already exists');
-      err.status = 409;
-      throw err;
-    }
-  }
-
   if (allowed.price !== undefined) allowed.price = Number(allowed.price);
   if (allowed.stock !== undefined) allowed.stock = Number(allowed.stock);
 
   const updated = { ...existing, ...allowed };
-
-  // If SKU changed, drop the old secondary-index entry
-  if (allowed.sku !== undefined && allowed.sku !== existing.sku) {
-    bySku.delete(existing.sku);
-  }
   syncMaps(updated);
   return updated;
 };
@@ -152,8 +138,11 @@ export const archiveById = (id) => {
 
 export const restore = (id) => {
   const existing = byId.get(id);
-  if (!existing) return null;
+  if (!existing || !existing.archivedAt) return null;
   const restored = { ...existing, archivedAt: null };
   syncMaps(restored);
   return restored;
 };
+
+// Test-only utility — clears both in-memory indexes so each test starts clean.
+export const _reset = () => { byId.clear(); bySku.clear(); };

@@ -3,7 +3,13 @@ import { CATEGORIES, STATUSES } from '../models/product.js';
 
 const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return next(Object.assign(new Error(errors.array()[0].msg), { status: 400 }));
+  if (!errors.isEmpty()) return next(Object.assign(new Error(errors.array()[0].msg), { status: 422 }));
+  next();
+};
+
+const rejectEmptyBody = (req, res, next) => {
+  if (!req.body || Object.keys(req.body).length === 0)
+    return next(Object.assign(new Error('Request body must not be empty'), { status: 400 }));
   next();
 };
 
@@ -28,6 +34,7 @@ export const validateCreate = [
 ];
 
 export const validateUpdate = [
+  rejectEmptyBody,
   categoryRule(body('category')),
   statusRule(body('status')),
   priceRule(body('price')),

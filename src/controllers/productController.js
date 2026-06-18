@@ -38,7 +38,7 @@ export const deleteProduct = catchAsync((req, res, next) => {
     err.status = 404;
     return next(err);
   }
-  res.json({ success: true, data });
+  res.status(204).send();
 });
 
 export const restoreProduct = catchAsync((req, res, next) => {
