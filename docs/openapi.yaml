@@ -1,0 +1,674 @@
+openapi: 3.1.0
+
+info:
+  title: Product Management API
+  version: 1.0.0
+  description: >
+    RESTful API for managing a product catalogue. Products can be created,
+    queried, updated, and soft-archived. A soft-archived product is hidden from
+    all list and get responses but is never deleted; its SKU remains permanently
+    reserved and cannot be reused by any future product, including new creates.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+tags:
+  - name: Products
+    description: Product catalogue operations
+
+paths:
+
+  /products:
+
+    get:
+      tags: [Products]
+      summary: List active products
+      operationId: getProducts
+      description: >
+        Returns all active (non-archived) products that match the supplied
+        filters. An empty result set is a success — the response body contains
+        an empty data array rather than a 404. Unknown query keys are silently
+        ignored. Filter conditions are cumulative (AND logic).
+      parameters:
+        - name: category
+          in: query
+          required: false
+          description: Exact-match filter on product category.
+          schema:
+            type: string
+            enum: [electronics, clothing, food, books, other]
+          example: electronics
+        - name: status
+          in: query
+          required: false
+          description: Exact-match filter on product lifecycle status.
+          schema:
+            type: string
+            enum: [active, inactive, discontinued]
+          example: active
+        - name: minPrice
+          in: query
+          required: false
+          description: >
+            Inclusive lower price bound. Products whose price is null are
+            excluded when this filter is present.
+          schema:
+            type: number
+          example: 10.00
+        - name: maxPrice
+          in: query
+          required: false
+          description: >
+            Inclusive upper price bound. Products whose price is null are
+            excluded when this filter is present.
+          schema:
+            type: number
+          example: 999.99
+        - name: inStock
+          in: query
+          required: false
+          description: >
+            Stock availability filter. The value is a string that is coerced to
+            a boolean server-side. "true" returns only products with stock > 0;
+            "false" returns only products with stock = 0.
+          schema:
+            type: string
+            enum: ["true", "false"]
+          example: "true"
+        - name: search
+          in: query
+          required: false
+          description: >
+            Case-insensitive substring match evaluated against both name and
+            description. A product is included if either field contains the
+            search string.
+          schema:
+            type: string
+            minLength: 1
+          example: headphone
+        - name: name
+          in: query
+          required: false
+          description: >
+            Case-insensitive substring match evaluated against product name
+            only. Use search to match across both name and description.
+          schema:
+            type: string
+            minLength: 1
+          example: wireless
+      responses:
+        "200":
+          description: List of matching active products (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+              example:
+                success: true
+                data:
+                  - id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    name: Wireless Headphones
+                    sku: WH-1000XM5
+                    description: Noise-cancelling over-ear headphones
+                    category: electronics
+                    price: 349.99
+                    stock: 42
+                    status: active
+                    createdAt: "2024-01-15T10:30:00.000Z"
+                    archivedAt: null
+        "422":
+          description: One or more query parameters failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: "category must be one of: electronics, clothing, food, books, other"
+
+    post:
+      tags: [Products]
+      summary: Create a product
+      operationId: createProduct
+      description: >
+        Creates a new product and returns the persisted record. SKU uniqueness
+        is enforced across the full lifetime of the store — an archived
+        product's SKU is permanently reserved and causes a 409 if a new product
+        tries to reuse it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+            example:
+              name: Wireless Headphones
+              sku: WH-1000XM5
+              description: Noise-cancelling over-ear headphones
+              category: electronics
+              price: 349.99
+              stock: 42
+              status: active
+      responses:
+        "201":
+          description: Product created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                success: true
+                data:
+                  id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  name: Wireless Headphones
+                  sku: WH-1000XM5
+                  description: Noise-cancelling over-ear headphones
+                  category: electronics
+                  price: 349.99
+                  stock: 42
+                  status: active
+                  createdAt: "2024-01-15T10:30:00.000Z"
+                  archivedAt: null
+        "400":
+          description: >
+            name or sku is missing or empty, or a supplied field value failed
+            model-layer validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: name is required
+        "409":
+          description: >
+            A product with the given SKU already exists. This applies to both
+            active and archived products — SKUs are never recycled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: A product with this SKU already exists
+        "422":
+          description: A request body field failed express-validator rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: price must be a positive number
+
+  /products/{id}:
+
+    get:
+      tags: [Products]
+      summary: Get a product by ID
+      operationId: getProduct
+      description: >
+        Returns a single active product. Archived products are treated as
+        absent and return 404, matching the behaviour a client would observe
+        before the product was ever created.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        "200":
+          description: Product found and returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                success: true
+                data:
+                  id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  name: Wireless Headphones
+                  sku: WH-1000XM5
+                  description: Noise-cancelling over-ear headphones
+                  category: electronics
+                  price: 349.99
+                  stock: 42
+                  status: active
+                  createdAt: "2024-01-15T10:30:00.000Z"
+                  archivedAt: null
+        "404":
+          description: No active product exists with the given ID (not found or archived).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Product not found
+
+    patch:
+      tags: [Products]
+      summary: Partially update a product
+      operationId: updateProduct
+      description: >
+        Applies a partial update to an existing active product. Only name,
+        description, category, price, stock, and status may be changed — id,
+        sku, and createdAt are immutable and silently ignored even if present
+        in the request body. Archived products return 404; restore the product
+        first before updating it.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductPatch'
+            example:
+              price: 299.99
+              stock: 30
+              status: active
+      responses:
+        "200":
+          description: Product updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                success: true
+                data:
+                  id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  name: Wireless Headphones
+                  sku: WH-1000XM5
+                  description: Noise-cancelling over-ear headphones
+                  category: electronics
+                  price: 299.99
+                  stock: 30
+                  status: active
+                  createdAt: "2024-01-15T10:30:00.000Z"
+                  archivedAt: null
+        "400":
+          description: >
+            Request body is empty (at least one field is required), or a
+            supplied field value failed model-layer validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyBody:
+                  summary: Empty request body
+                  value:
+                    success: false
+                    error: Request body must not be empty
+                invalidPrice:
+                  summary: Invalid price value
+                  value:
+                    success: false
+                    error: price must be a positive number
+        "404":
+          description: No active product exists with the given ID (not found or archived).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Product not found
+        "422":
+          description: A request body field failed express-validator rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: "status must be one of: active, inactive, discontinued"
+
+    delete:
+      tags: [Products]
+      summary: Archive (soft-delete) a product
+      operationId: deleteProduct
+      description: >
+        Soft-archives a product by stamping its archivedAt timestamp. The
+        product is immediately hidden from GET /products and GET /products/{id}
+        but is NOT deleted from the store. Its SKU remains permanently reserved.
+        To undo, call DELETE /products/{id}/restore. Calling this on an
+        already-archived product returns 404.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        "204":
+          description: Product archived successfully. No response body is returned.
+        "404":
+          description: No active product exists with the given ID (not found or already archived).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Product not found
+
+  /products/{id}/restore:
+
+    delete:
+      tags: [Products]
+      summary: Restore an archived product
+      operationId: restoreProduct
+      description: >
+        Clears the archivedAt timestamp of a previously archived product,
+        making it visible in list and get responses again. Calling this on
+        a product that is active (not archived) or on an unknown ID returns
+        404 — there is nothing to restore.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        "200":
+          description: Product restored and returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+              example:
+                success: true
+                data:
+                  id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  name: Wireless Headphones
+                  sku: WH-1000XM5
+                  description: Noise-cancelling over-ear headphones
+                  category: electronics
+                  price: 349.99
+                  stock: 42
+                  status: active
+                  createdAt: "2024-01-15T10:30:00.000Z"
+                  archivedAt: null
+        "404":
+          description: >
+            No archived product exists with the given ID (not found, or the
+            product is currently active).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Product not found
+
+components:
+
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      description: UUID of the product.
+      schema:
+        type: string
+        format: uuid
+      example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+  schemas:
+
+    # ------------------------------------------------------------------ #
+    #  Core domain object                                                  #
+    # ------------------------------------------------------------------ #
+
+    Product:
+      type: object
+      description: >
+        Full product record as stored and returned by the API. The id, sku, and
+        createdAt fields are immutable after creation. archivedAt is null for
+        active products and an ISO 8601 timestamp for archived ones — archived
+        products are invisible to normal read operations but retain their SKU
+        permanently.
+      required:
+        - id
+        - name
+        - sku
+        - description
+        - category
+        - price
+        - stock
+        - status
+        - createdAt
+        - archivedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Auto-generated unique identifier. Immutable after creation.
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        name:
+          type: string
+          minLength: 1
+          description: Human-readable product name. Leading/trailing whitespace is trimmed on input.
+          example: Wireless Headphones
+        sku:
+          type: string
+          minLength: 1
+          description: >
+            Stock-keeping unit. Unique across all products including archived
+            ones — a retired SKU is permanently reserved and can never be
+            reassigned. Immutable after creation.
+          example: WH-1000XM5
+        description:
+          type: string
+          description: Free-text product description.
+          default: ""
+          example: Noise-cancelling over-ear headphones
+        category:
+          type: [string, "null"]
+          enum: [electronics, clothing, food, books, other, null]
+          description: Product category. null when not explicitly set.
+          default: null
+          example: electronics
+        price:
+          type: [number, "null"]
+          exclusiveMinimum: 0
+          multipleOf: 0.01
+          description: >
+            Unit price. Must be a positive number with at most 2 decimal places.
+            null when not explicitly set.
+          default: null
+          example: 349.99
+        stock:
+          type: integer
+          minimum: 0
+          description: Inventory count. Non-negative integer.
+          default: 0
+          example: 42
+        status:
+          type: string
+          enum: [active, inactive, discontinued]
+          description: Lifecycle status of the product.
+          default: active
+          example: active
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp set on creation. Immutable after creation.
+          example: "2024-01-15T10:30:00.000Z"
+        archivedAt:
+          type: [string, "null"]
+          format: date-time
+          description: >
+            ISO 8601 timestamp set when the product is soft-archived.
+            null for active products.
+          default: null
+          example: null
+
+    # ------------------------------------------------------------------ #
+    #  Request body schemas                                                #
+    # ------------------------------------------------------------------ #
+
+    ProductInput:
+      type: object
+      description: >
+        Fields accepted when creating a new product. name and sku are required;
+        all other fields are optional and fall back to the documented defaults.
+        id, createdAt, and archivedAt are server-managed and must not be sent.
+      required:
+        - name
+        - sku
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Human-readable product name. Leading/trailing whitespace is trimmed.
+          example: Wireless Headphones
+        sku:
+          type: string
+          minLength: 1
+          description: >
+            Stock-keeping unit. Must be unique across all products including
+            archived ones. Immutable after creation.
+          example: WH-1000XM5
+        description:
+          type: string
+          description: Free-text product description.
+          default: ""
+          example: Noise-cancelling over-ear headphones
+        category:
+          type: string
+          enum: [electronics, clothing, food, books, other]
+          description: Product category. Omit to default to null.
+          example: electronics
+        price:
+          type: number
+          exclusiveMinimum: 0
+          multipleOf: 0.01
+          description: >
+            Unit price. Must be a positive number with at most 2 decimal places.
+            Omit to default to null.
+          example: 349.99
+        stock:
+          type: integer
+          minimum: 0
+          description: Inventory count. Must be a non-negative integer. Defaults to 0.
+          default: 0
+          example: 42
+        status:
+          type: string
+          enum: [active, inactive, discontinued]
+          description: Lifecycle status. Defaults to "active".
+          default: active
+          example: active
+
+    ProductPatch:
+      type: object
+      description: >
+        Fields accepted when partially updating a product. All fields are
+        optional, but the request body must contain at least one. id, sku, and
+        createdAt are immutable — they are silently ignored even if present.
+        Archived products reject updates with 404; restore them first.
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Replacement product name. Leading/trailing whitespace is trimmed.
+          example: Sony WH-1000XM5
+        description:
+          type: string
+          description: Replacement product description.
+          example: Updated noise-cancelling over-ear headphones
+        category:
+          type: string
+          enum: [electronics, clothing, food, books, other]
+          description: Replacement product category.
+          example: electronics
+        price:
+          type: number
+          exclusiveMinimum: 0
+          multipleOf: 0.01
+          description: >
+            Replacement unit price. Must be a positive number with at most 2
+            decimal places.
+          example: 299.99
+        stock:
+          type: integer
+          minimum: 0
+          description: Replacement inventory count. Must be a non-negative integer.
+          example: 30
+        status:
+          type: string
+          enum: [active, inactive, discontinued]
+          description: Replacement lifecycle status.
+          example: inactive
+
+    # ------------------------------------------------------------------ #
+    #  Response envelope schemas                                           #
+    # ------------------------------------------------------------------ #
+
+    ApiEnvelope:
+      type: object
+      description: >
+        Generic wrapper shape shared by all JSON responses. Successful responses
+        set success to true and populate data. Error responses set success to
+        false and populate error. See ProductResponse, ProductListResponse, and
+        ErrorResponse for concrete typed shapes.
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          description: true for successful responses; false for all error responses.
+        data:
+          description: Response payload present on successful operations.
+        error:
+          type: string
+          description: Human-readable error message present on failed operations.
+
+    ErrorResponse:
+      type: object
+      description: >
+        Returned by all 4xx responses. success is always false. error contains
+        the first validation message or the model/controller error message.
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+          description: Always false for error responses.
+          example: false
+        error:
+          type: string
+          description: Human-readable description of what went wrong.
+          example: Product not found
+
+    ProductResponse:
+      type: object
+      description: Successful single-product response envelope.
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+          description: Always true for successful responses.
+          example: true
+        data:
+          $ref: '#/components/schemas/Product'
+
+    ProductListResponse:
+      type: object
+      description: Successful product-list response envelope.
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+          description: Always true for successful responses.
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+          description: >
+            Array of active products that matched the supplied filters.
+            May be empty — an empty array is a valid successful response.
