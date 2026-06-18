@@ -3,7 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 export const CATEGORIES = ['electronics', 'clothing', 'food', 'books', 'other'];
 export const STATUSES = ['active', 'inactive', 'discontinued'];
 
-const products = [];
+// Primary index: id → product
+const byId = new Map();
+// Secondary index: sku → product (includes archived — prevents SKU reuse)
+const bySku = new Map();
 
 const badRequest = (message) => {
   const err = new Error(message);
@@ -41,34 +44,48 @@ const validate = (data, isCreate) => {
   }
 };
 
+// Single-pass filter: conditions ordered cheapest-first so a continue skips
+// all remaining checks for that product (price/stock comparisons before string
+// .includes(), archived guard before everything else).
 export const findAll = (filters = {}) => {
-  let result = [...products].filter(p => !p.archivedAt);
-  if (filters.category) result = result.filter(p => p.category === filters.category);
-  if (filters.status) result = result.filter(p => p.status === filters.status);
-  if (filters.minPrice !== undefined) result = result.filter(p => p.price !== null && p.price >= filters.minPrice);
-  if (filters.maxPrice !== undefined) result = result.filter(p => p.price !== null && p.price <= filters.maxPrice);
-  if (filters.inStock !== undefined) result = result.filter(p => filters.inStock ? p.stock > 0 : p.stock === 0);
-  if (filters.search) {
-    const q = filters.search.toLowerCase();
-    result = result.filter(p => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q));
-  }
-  if (filters.name) {
-    const query = filters.name.toLowerCase();
-    result = result.filter(p => p.name.toLowerCase().includes(query));
+  const { category, status, minPrice, maxPrice, inStock, search, name: nameFilter } = filters;
+  const searchQ = search ? search.toLowerCase() : null;
+  const nameQ = nameFilter ? nameFilter.toLowerCase() : null;
+
+  const result = [];
+  for (const p of byId.values()) {
+    if (p.archivedAt) continue;
+    if (category && p.category !== category) continue;
+    if (status && p.status !== status) continue;
+    if (minPrice !== undefined && (p.price === null || p.price < minPrice)) continue;
+    if (maxPrice !== undefined && (p.price === null || p.price > maxPrice)) continue;
+    if (inStock !== undefined && (inStock ? p.stock <= 0 : p.stock !== 0)) continue;
+    if (nameQ && !p.name.toLowerCase().includes(nameQ)) continue;
+    if (searchQ && !p.name.toLowerCase().includes(searchQ) && !p.description.toLowerCase().includes(searchQ)) continue;
+    result.push(p);
   }
   return result;
 };
 
-export const findById = (id) => products.find(p => p.id === id && !p.archivedAt) ?? null;
+// O(1) — single Map lookup
+export const findById = (id) => {
+  const p = byId.get(id);
+  return p && !p.archivedAt ? p : null;
+};
 
-export const findBySku = (sku) => products.find(p => p.sku === sku) ?? null;
+// O(1) — secondary index; returns archived products too (guards SKU uniqueness)
+export const findBySku = (sku) => bySku.get(sku) ?? null;
+
+const syncMaps = (product) => {
+  byId.set(product.id, product);
+  bySku.set(product.sku, product);
+};
 
 export const create = (data) => {
   validate(data, true);
 
-  const existing = findBySku(data.sku);
-  if (existing) {
-    const err = new Error(`SKU '${data.sku}' already exists`);
+  if (bySku.has(data.sku.trim())) {
+    const err = new Error('A product with this SKU already exists');
     err.status = 409;
     throw err;
   }
@@ -86,43 +103,57 @@ export const create = (data) => {
     archivedAt: null,
   };
 
-  products.push(product);
+  syncMaps(product);
   return product;
 };
 
 export const update = (id, patch) => {
-  const index = products.findIndex(p => p.id === id && !p.archivedAt);
-  if (index === -1) return null;
+  const existing = byId.get(id);
+  if (!existing || existing.archivedAt) return null;
 
-  validate(patch, false);
+  // Whitelist mutable fields — prevents mass assignment of id/createdAt/archivedAt
+  const { name, sku, description, category, price, stock, status } = patch;
+  const allowed = Object.fromEntries(
+    Object.entries({ name, sku, description, category, price, stock, status })
+      .filter(([, v]) => v !== undefined)
+  );
 
-  if (patch.sku !== undefined) {
-    const dup = findBySku(patch.sku);
+  validate(allowed, false);
+
+  if (allowed.sku !== undefined) {
+    const dup = bySku.get(allowed.sku);
     if (dup && dup.id !== id) {
-      const err = new Error(`SKU '${patch.sku}' already exists`);
+      const err = new Error('A product with this SKU already exists');
       err.status = 409;
       throw err;
     }
   }
 
-  const updated = { ...products[index], ...patch };
-  if (patch.price !== undefined) updated.price = Number(patch.price);
-  if (patch.stock !== undefined) updated.stock = Number(patch.stock);
+  if (allowed.price !== undefined) allowed.price = Number(allowed.price);
+  if (allowed.stock !== undefined) allowed.stock = Number(allowed.stock);
 
-  products[index] = updated;
+  const updated = { ...existing, ...allowed };
+
+  // If SKU changed, drop the old secondary-index entry
+  if (allowed.sku !== undefined && allowed.sku !== existing.sku) {
+    bySku.delete(existing.sku);
+  }
+  syncMaps(updated);
   return updated;
 };
 
 export const archiveById = (id) => {
-  const index = products.findIndex(p => p.id === id && !p.archivedAt);
-  if (index === -1) return null;
-  products[index] = { ...products[index], archivedAt: new Date() };
-  return products[index];
+  const existing = byId.get(id);
+  if (!existing || existing.archivedAt) return null;
+  const archived = { ...existing, archivedAt: new Date() };
+  syncMaps(archived);
+  return archived;
 };
 
 export const restore = (id) => {
-  const index = products.findIndex(p => p.id === id);
-  if (index === -1) return null;
-  products[index] = { ...products[index], archivedAt: null };
-  return products[index];
+  const existing = byId.get(id);
+  if (!existing) return null;
+  const restored = { ...existing, archivedAt: null };
+  syncMaps(restored);
+  return restored;
 };
