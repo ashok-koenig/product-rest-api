@@ -247,3 +247,6 @@ export const restore = (id) => {
  */
 // Test-only utility — clears both in-memory indexes so each test starts clean.
 export const _reset = () => { byId.clear(); bySku.clear(); };
+
+
+// End of product model
