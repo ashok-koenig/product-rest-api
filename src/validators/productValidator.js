@@ -26,6 +26,7 @@ const stockRule = (src) => src.optional().isInt({ min: 0 }).withMessage('stock m
 export const validateCreate = [
   body('name').trim().notEmpty().withMessage('name is required'),
   body('sku').trim().notEmpty().withMessage('sku is required'),
+  body('description').optional().isString().withMessage('description must be a string').trim(),
   categoryRule(body('category')),
   statusRule(body('status')),
   priceRule(body('price')),
@@ -35,6 +36,7 @@ export const validateCreate = [
 
 export const validateUpdate = [
   rejectEmptyBody,
+  body('description').optional().isString().withMessage('description must be a string').trim(),
   categoryRule(body('category')),
   statusRule(body('status')),
   priceRule(body('price')),
