@@ -1,7 +1,11 @@
+// src/index.js — updated for Render
 import app from './app.js';
 
-const PORT = 3000;
+// Render sets PORT automatically. Fall back to 3000 for local dev.
+const PORT = process.env.PORT ?? 3000;
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Product Management API running on port ${PORT}`);
+  console.log(`REST API:  http://localhost:${PORT}/products`);
+  console.log(`MCP:       http://localhost:${PORT}/mcp`);
 });
