@@ -6,6 +6,17 @@
       "headers": {
         "Authorization": "Bearer YOUR_GITHUB_PAT"
       }
+    },
+    "product-api": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "../product-mcp-server/src/index.js"
+      ],
+      "env": {
+        "RODUCT_API_URL": "http://localhost:3000",
+        "PRODUCT_API_DIR": "../product-management-api"
+      }
     }
   }
 }
